@@ -1,0 +1,573 @@
+{
+  "openapi": "3.0.2",
+  "info": {
+    "title": "Open Library API (Enhanced)",
+    "version": "0.2.0",
+    "description": "Enhanced OpenAPI specification with proper schemas for typed model generation. This demonstrates how to create OpenAPI specs that work well with Microsoft Kiota."
+  },
+  "servers": [
+    {
+      "url": "https://openlibrary.org",
+      "description": "Open Library Production Server"
+    }
+  ],
+  "tags": [
+    {
+      "name": "search",
+      "description": "Search for books, authors, and more"
+    },
+    {
+      "name": "authors",
+      "description": "Retrieve author information"
+    },
+    {
+      "name": "books",
+      "description": "Retrieve book information"
+    }
+  ],
+  "paths": {
+    "/search.json": {
+      "get": {
+        "summary": "Search Books",
+        "description": "Search for books by title, author, or other criteria. This endpoint has a PROPER SCHEMA and will generate typed models.",
+        "operationId": "searchBooks",
+        "tags": ["search"],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "description": "Search query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "The Lord of the Rings"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Maximum number of results to return",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 10,
+              "minimum": 1,
+              "maximum": 100
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "description": "Page number for pagination",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 1,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful search response with TYPED models",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/authors/{olid}.json": {
+      "get": {
+        "summary": "Get Author Details",
+        "description": "Retrieve detailed information about an author. This endpoint has a PROPER SCHEMA and will generate typed models.",
+        "operationId": "getAuthor",
+        "tags": ["authors"],
+        "parameters": [
+          {
+            "name": "olid",
+            "in": "path",
+            "description": "Open Library ID of the author",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "OL26320A"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Author details with TYPED model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Author"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Author not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/books/{olid}.json": {
+      "get": {
+        "summary": "Get Book Details (Untyped)",
+        "description": "Retrieve book information. This endpoint has NO SCHEMA and will generate UntypedNode to demonstrate the difference.",
+        "operationId": "getBook",
+        "tags": ["books"],
+        "parameters": [
+          {
+            "name": "olid",
+            "in": "path",
+            "description": "Open Library ID of the book",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "OL27448W"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Book details (returns UntypedNode due to empty schema)",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/isbn/{isbn}.json": {
+      "get": {
+        "summary": "Get Book by ISBN",
+        "description": "Retrieve book information by ISBN. This endpoint has a PROPER SCHEMA.",
+        "operationId": "getBookByIsbn",
+        "tags": ["books"],
+        "parameters": [
+          {
+            "name": "isbn",
+            "in": "path",
+            "description": "ISBN of the book",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "example": "0395489318"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Book details with TYPED model",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Book"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Book not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "SearchResponse": {
+        "type": "object",
+        "description": "Response from book search",
+        "properties": {
+          "numFound": {
+            "type": "integer",
+            "description": "Total number of results found"
+          },
+          "start": {
+            "type": "integer",
+            "description": "Starting offset for pagination"
+          },
+          "numFoundExact": {
+            "type": "boolean",
+            "description": "Whether the count is exact"
+          },
+          "docs": {
+            "type": "array",
+            "description": "Array of search results",
+            "items": {
+              "$ref": "#/components/schemas/SearchDoc"
+            }
+          },
+          "q": {
+            "type": "string",
+            "description": "The search query used"
+          }
+        },
+        "required": ["numFound", "docs"]
+      },
+      "SearchDoc": {
+        "type": "object",
+        "description": "A single search result document",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Open Library work key",
+            "example": "/works/OL27448W"
+          },
+          "title": {
+            "type": "string",
+            "description": "Title of the work",
+            "example": "The Lord of the Rings"
+          },
+          "author_key": {
+            "type": "array",
+            "description": "Array of author keys",
+            "items": {
+              "type": "string"
+            }
+          },
+          "author_name": {
+            "type": "array",
+            "description": "Array of author names",
+            "items": {
+              "type": "string"
+            }
+          },
+          "first_publish_year": {
+            "type": "integer",
+            "description": "Year of first publication",
+            "example": 1954
+          },
+          "edition_count": {
+            "type": "integer",
+            "description": "Number of editions available"
+          },
+          "cover_i": {
+            "type": "integer",
+            "description": "Cover image ID"
+          },
+          "isbn": {
+            "type": "array",
+            "description": "List of ISBNs",
+            "items": {
+              "type": "string"
+            }
+          },
+          "language": {
+            "type": "array",
+            "description": "Available languages",
+            "items": {
+              "type": "string"
+            }
+          },
+          "publisher": {
+            "type": "array",
+            "description": "List of publishers",
+            "items": {
+              "type": "string"
+            }
+          },
+          "subject": {
+            "type": "array",
+            "description": "Book subjects/categories",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": ["key", "title"]
+      },
+      "Author": {
+        "type": "object",
+        "description": "Author information",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Open Library author key",
+            "example": "/authors/OL26320A"
+          },
+          "name": {
+            "type": "string",
+            "description": "Author's name",
+            "example": "J.R.R. Tolkien"
+          },
+          "personal_name": {
+            "type": "string",
+            "description": "Author's personal name"
+          },
+          "birth_date": {
+            "type": "string",
+            "description": "Date of birth",
+            "example": "3 January 1892"
+          },
+          "death_date": {
+            "type": "string",
+            "description": "Date of death",
+            "example": "2 September 1973"
+          },
+          "bio": {
+            "$ref": "#/components/schemas/Bio"
+          },
+          "alternate_names": {
+            "type": "array",
+            "description": "Alternative names for the author",
+            "items": {
+              "type": "string"
+            }
+          },
+          "remote_ids": {
+            "$ref": "#/components/schemas/RemoteIds"
+          },
+          "links": {
+            "type": "array",
+            "description": "External links",
+            "items": {
+              "$ref": "#/components/schemas/Link"
+            }
+          },
+          "photos": {
+            "type": "array",
+            "description": "Photo IDs",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "created": {
+            "$ref": "#/components/schemas/ChangeRecord"
+          },
+          "last_modified": {
+            "$ref": "#/components/schemas/ChangeRecord"
+          },
+          "latest_revision": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": ["key", "name"]
+      },
+      "Book": {
+        "type": "object",
+        "description": "Book information",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Open Library book key"
+          },
+          "title": {
+            "type": "string",
+            "description": "Book title"
+          },
+          "subtitle": {
+            "type": "string",
+            "description": "Book subtitle"
+          },
+          "authors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AuthorReference"
+            }
+          },
+          "publish_date": {
+            "type": "string",
+            "description": "Publication date"
+          },
+          "publishers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isbn_10": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "isbn_13": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "number_of_pages": {
+            "type": "integer",
+            "description": "Number of pages in the book"
+          },
+          "weight": {
+            "type": "string",
+            "description": "Physical weight of the book"
+          },
+          "covers": {
+            "type": "array",
+            "description": "Cover image IDs",
+            "items": {
+              "type": "integer"
+            }
+          },
+          "subjects": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "description": {
+            "type": "string",
+            "description": "Book description"
+          },
+          "created": {
+            "$ref": "#/components/schemas/ChangeRecord"
+          },
+          "last_modified": {
+            "$ref": "#/components/schemas/ChangeRecord"
+          },
+          "latest_revision": {
+            "type": "integer"
+          },
+          "revision": {
+            "type": "integer"
+          }
+        },
+        "required": ["key", "title"]
+      },
+      "Bio": {
+        "type": "object",
+        "description": "Biography information",
+        "properties": {
+          "type": {
+            "type": "string",
+            "example": "/type/text"
+          },
+          "value": {
+            "type": "string",
+            "description": "Biography text"
+          }
+        }
+      },
+      "RemoteIds": {
+        "type": "object",
+        "description": "External identifiers",
+        "properties": {
+          "viaf": {
+            "type": "string"
+          },
+          "wikidata": {
+            "type": "string"
+          },
+          "goodreads": {
+            "type": "string"
+          },
+          "isni": {
+            "type": "string"
+          },
+          "amazon": {
+            "type": "string"
+          },
+          "imdb": {
+            "type": "string"
+          },
+          "musicbrainz": {
+            "type": "string"
+          },
+          "project_gutenberg": {
+            "type": "string"
+          },
+          "librarything": {
+            "type": "string"
+          }
+        }
+      },
+      "Link": {
+        "type": "object",
+        "properties": {
+          "url": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "type": {
+            "$ref": "#/components/schemas/TypeReference"
+          }
+        }
+      },
+      "TypeReference": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          }
+        }
+      },
+      "AuthorReference": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Author key reference"
+          }
+        }
+      },
+      "ChangeRecord": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "value": {
+            "type": "string",
+            "format": "date-time"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "message": {
+            "type": "string",
+            "description": "Detailed error description"
+          }
+        },
+        "required": ["error"]
+      }
+    }
+  }
+}

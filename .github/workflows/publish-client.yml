@@ -1,0 +1,252 @@
+name: Generate and Publish Client to Palantir Artifactory
+
+on:
+  schedule:
+    # Run daily at 2 AM UTC
+    - cron: '0 2 * * *'
+  
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Package version (e.g., 1.0.0)'
+        required: false
+        default: ''
+      skip_generation:
+        description: 'Skip code generation'
+        required: false
+        type: boolean
+        default: false
+      skip_tests:
+        description: 'Skip running tests'
+        required: false
+        type: boolean
+        default: false
+      skip_publish:
+        description: 'Skip publishing to Artifactory'
+        required: false
+        type: boolean
+        default: false
+      spec_url:
+        description: 'OpenAPI spec URL (optional override)'
+        required: false
+        default: ''
+  
+  push:
+    branches: [main]
+    paths:
+      - 'demo/openlibrary-openapi.json'
+      - 'src/**'
+      - 'scripts/**'
+      - '.github/workflows/publish-client.yml'
+
+env:
+  DOTNET_VERSION: '9.0.x'
+  OPENAPI_SPEC_URL: ${{ github.event.inputs.spec_url || secrets.OPENAPI_SPEC_URL || 'https://openlibrary.org/static/openapi.json' }}
+  ARTIFACTORY_URL: ${{ secrets.ARTIFACTORY_URL || 'https://artifactory.palantir.com/artifactory' }}
+  ARTIFACTORY_REPO: ${{ secrets.ARTIFACTORY_REPO || 'nuget-local' }}
+  ARTIFACTORY_USERNAME: ${{ secrets.ARTIFACTORY_USERNAME }}
+  ARTIFACTORY_API_KEY: ${{ secrets.ARTIFACTORY_API_KEY }}
+
+jobs:
+  generate-and-publish:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for version calculation
+    
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: ${{ env.DOTNET_VERSION }}
+    
+    - name: Install Kiota
+      run: |
+        echo "Installing Microsoft Kiota..."
+        dotnet tool install -g Microsoft.OpenApi.Kiota
+        echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+        echo "Kiota version:"
+        $HOME/.dotnet/tools/kiota --version || echo "Version command not available"
+    
+    - name: Calculate Version
+      id: version
+      run: |
+        if [ "${{ github.event.inputs.version }}" != "" ]; then
+          VERSION="${{ github.event.inputs.version }}"
+        else
+          # Semantic versioning: major.minor.patch
+          # Using date for minor and run number for patch
+          MAJOR=1
+          MINOR=$(date +'%Y%m%d')
+          PATCH=${GITHUB_RUN_NUMBER}
+          VERSION="$MAJOR.$MINOR.$PATCH"
+        fi
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        echo "Calculated version: $VERSION"
+    
+    - name: Generate C# Client
+      if: github.event.inputs.skip_generation != 'true'
+      run: |
+        echo "Generating C# client with Kiota..."
+        OUTPUT_DIR="src/OpenApiClient/Generated"
+        
+        # Clean and create output directory
+        rm -rf "$OUTPUT_DIR"
+        mkdir -p "$OUTPUT_DIR"
+        
+        # Generate the client
+        $HOME/.dotnet/tools/kiota generate \
+          --language CSharp \
+          --openapi "${{ env.OPENAPI_SPEC_URL }}" \
+          --output "$OUTPUT_DIR" \
+          --class-name OpenApiClient \
+          --namespace-name OpenApiClient \
+          --clean-output \
+          --exclude-backward-compatible \
+          --log-level Information
+        
+        echo "Generated files:"
+        find "$OUTPUT_DIR" -type f -name "*.cs" | head -20
+    
+    - name: Update Version
+      run: |
+        # Update version in project file
+        PROJECT_FILE="src/OpenApiClient/OpenApiClient.csproj"
+        sed -i "s|<Version>.*</Version>|<Version>${{ steps.version.outputs.VERSION }}</Version>|g" "$PROJECT_FILE"
+        sed -i "s|<AssemblyVersion>.*</AssemblyVersion>|<AssemblyVersion>${{ steps.version.outputs.VERSION }}</AssemblyVersion>|g" "$PROJECT_FILE"
+        sed -i "s|<FileVersion>.*</FileVersion>|<FileVersion>${{ steps.version.outputs.VERSION }}</FileVersion>|g" "$PROJECT_FILE"
+        
+        echo "Updated project version to ${{ steps.version.outputs.VERSION }}"
+    
+    - name: Restore Dependencies
+      run: |
+        dotnet restore
+    
+    - name: Build
+      run: |
+        dotnet build --configuration Release --no-restore
+    
+    - name: Run Tests
+      if: github.event.inputs.skip_tests != 'true'
+      run: |
+        if [ -f "test/OpenApiClient.Tests/OpenApiClient.Tests.csproj" ]; then
+          dotnet test \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --logger "trx;LogFileName=test-results.trx" \
+            --collect:"XPlat Code Coverage"
+        else
+          echo "No test project found, skipping tests"
+        fi
+    
+    - name: Pack NuGet Package
+      run: |
+        dotnet pack src/OpenApiClient/OpenApiClient.csproj \
+          --configuration Release \
+          --no-build \
+          --output ./artifacts \
+          /p:PackageVersion=${{ steps.version.outputs.VERSION }}
+        
+        echo "Package created:"
+        ls -la ./artifacts/*.nupkg
+    
+    - name: Publish to Artifactory
+      if: github.event.inputs.skip_publish != 'true'
+      run: |
+        if [ -z "${{ env.ARTIFACTORY_USERNAME }}" ] || [ -z "${{ env.ARTIFACTORY_API_KEY }}" ]; then
+          echo "⚠️ Artifactory credentials not configured. Skipping publish."
+          echo "Please set ARTIFACTORY_USERNAME and ARTIFACTORY_API_KEY secrets."
+          exit 0
+        fi
+        
+        PACKAGE_PATH=$(ls ./artifacts/*.nupkg | head -n 1)
+        SOURCE_NAME="PalantirArtifactory"
+        SOURCE_URL="${{ env.ARTIFACTORY_URL }}/api/nuget/${{ env.ARTIFACTORY_REPO }}"
+        
+        echo "Configuring NuGet source..."
+        dotnet nuget remove source "$SOURCE_NAME" 2>/dev/null || true
+        
+        dotnet nuget add source "$SOURCE_URL" \
+          --name "$SOURCE_NAME" \
+          --username "${{ env.ARTIFACTORY_USERNAME }}" \
+          --password "${{ env.ARTIFACTORY_API_KEY }}" \
+          --store-password-in-clear-text
+        
+        echo "Publishing package..."
+        dotnet nuget push "$PACKAGE_PATH" \
+          --source "$SOURCE_NAME" \
+          --api-key "${{ env.ARTIFACTORY_USERNAME }}:${{ env.ARTIFACTORY_API_KEY }}" \
+          --skip-duplicate \
+          --timeout 600
+        
+        echo "✅ Package published successfully!"
+        echo "Package: $(basename $PACKAGE_PATH)"
+        echo "Version: ${{ steps.version.outputs.VERSION }}"
+        echo "Artifactory URL: ${{ env.ARTIFACTORY_URL }}/webapp/#/artifacts/browse/tree/General/${{ env.ARTIFACTORY_REPO }}/OpenApiClient/${{ steps.version.outputs.VERSION }}"
+    
+    - name: Upload Build Artifacts
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts-${{ steps.version.outputs.VERSION }}
+        path: |
+          ./artifacts/*.nupkg
+          ./src/OpenApiClient/kiota-lock.json
+        retention-days: 30
+    
+    - name: Upload Test Results
+      if: always() && github.event.inputs.skip_tests != 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: test-results-${{ steps.version.outputs.VERSION }}
+        path: |
+          **/*.trx
+          **/coverage.cobertura.xml
+        retention-days: 30
+    
+    - name: Create Release
+      if: github.event.inputs.skip_publish != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: v${{ steps.version.outputs.VERSION }}
+        release_name: Release ${{ steps.version.outputs.VERSION }}
+        body: |
+          ## 🚀 Auto-generated C# Client Release
+          
+          ### Package Information
+          - **Version:** ${{ steps.version.outputs.VERSION }}
+          - **Client Name:** OpenApiClient
+          - **Generator:** Microsoft Kiota
+          - **OpenAPI Spec:** ${{ env.OPENAPI_SPEC_URL }}
+          
+          ### Installation
+          ```bash
+          dotnet add package OpenApiClient --version ${{ steps.version.outputs.VERSION }}
+          ```
+          
+          ### Features
+          - Type-safe client generation
+          - Automatic serialization/deserialization
+          - Built-in retry and error handling
+          - Dependency injection support
+          
+          ### Artifactory
+          Published to: `${{ env.ARTIFACTORY_REPO }}`
+        draft: false
+        prerelease: false
+
+  notify-on-failure:
+    runs-on: ubuntu-latest
+    needs: generate-and-publish
+    if: failure()
+    steps:
+    - name: Notify Build Failure
+      run: |
+        echo "❌ Build failed for version calculation"
+        echo "Check the logs for details"
+        # Add your notification logic here (Slack, email, etc.)
